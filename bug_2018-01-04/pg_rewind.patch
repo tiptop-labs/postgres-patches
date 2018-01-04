@@ -1,0 +1,33 @@
+diff --git a/src/bin/pg_rewind/libpq_fetch.c b/src/bin/pg_rewind/libpq_fetch.c
+index 0cdff55..74d8f1c7 100644
+--- a/src/bin/pg_rewind/libpq_fetch.c
++++ b/src/bin/pg_rewind/libpq_fetch.c
+@@ -351,7 +351,8 @@ receiveFileChunks(const char *sql)
+ 		pg_log(PG_DEBUG, "received chunk for file \"%s\", offset %s, size %d\n",
+ 			   filename, chunkoff_str, chunksize);
+ 
+-		open_target_file(filename, false);
++		/* Trunc target file for action FILE_ACTION_COPY. */
++		open_target_file(filename, chunkoff == 0);
+ 
+ 		write_target_range(chunk, chunkoff, chunksize);
+ 
+@@ -478,8 +479,6 @@ libpq_executeFileMap(filemap_t *map)
+ 				break;
+ 
+ 			case FILE_ACTION_COPY:
+-				/* Truncate the old file out of the way, if any */
+-				open_target_file(entry->path, true);
+ 				fetch_file_range(entry->path, 0, entry->newsize);
+ 				break;
+ 
+@@ -520,7 +519,8 @@ libpq_executeFileMap(filemap_t *map)
+ 	sql =
+ 		"SELECT path, begin,\n"
+ 		"  pg_read_binary_file(path, begin, len, true) AS chunk\n"
+-		"FROM fetchchunks\n";
++		"FROM fetchchunks\n"
++		"ORDER BY path, begin\n";
+ 
+ 	receiveFileChunks(sql);
+ }

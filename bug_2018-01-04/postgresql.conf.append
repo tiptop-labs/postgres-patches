@@ -1,0 +1,5 @@
+hot_standby = on
+max_wal_senders = 2
+wal_keep_segments = 128
+wal_level = replica
+wal_log_hints = on

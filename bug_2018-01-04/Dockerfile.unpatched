@@ -1,0 +1,35 @@
+FROM debian:buster
+
+RUN apt-get update
+
+ENV VERSION 10
+
+RUN apt-get install -y postgresql-$VERSION
+RUN apt-get install -y less
+
+USER postgres
+
+RUN pg_createcluster -p 5433 $VERSION pg1
+RUN pg_createcluster -p 5434 $VERSION pg2
+
+ENV PG1_ETC /etc/postgresql/$VERSION/pg1
+ENV PG2_ETC /etc/postgresql/$VERSION/pg2
+ENV PG1_PGDATA /var/lib/postgresql/$VERSION/pg1
+ENV PG2_PGDATA /var/lib/postgresql/$VERSION/pg2
+ENV PG1_CRED "-h /var/run/postgresql -p 5433"
+ENV PG2_CRED "-h /var/run/postgresql -p 5434"
+ENV PG1_CONN "host=/var/run/postgresql port=5433"
+ENV PG2_CONN "host=/var/run/postgresql port=5434"
+
+COPY --chown=postgres:postgres server.key $PG1_PGDATA
+COPY --chown=postgres:postgres server.key $PG2_PGDATA
+RUN chmod 400 $PG1_PGDATA/server.key
+RUN chmod 400 $PG2_PGDATA/server.key
+COPY --chown=postgres:postgres postgresql.conf.append /tmp/postgresql.conf
+RUN cat /tmp/postgresql.conf >> $PG1_ETC/postgresql.conf
+RUN cat /tmp/postgresql.conf >> $PG2_ETC/postgresql.conf
+COPY --chown=postgres:postgres recovery.done.pg1 $PG1_PGDATA/recovery.done
+COPY --chown=postgres:postgres recovery.conf.pg2 $PG2_PGDATA/recovery.conf
+COPY --chown=postgres:postgres start.sh /usr/local/bin/start.sh
+
+CMD ["start.sh"]

@@ -1,0 +1,64 @@
+FROM debian:buster
+
+RUN apt-get update
+ENV TERM xterm
+
+ENV VERSION 10
+
+RUN apt-get install -y git
+RUN apt-get install -y gcc make bison flex
+RUN apt-get install -y libedit2 libedit-dev
+RUN apt-get install -y zlib1g zlib1g-dev
+RUN apt-get install -y libssl-dev
+
+RUN useradd postgres
+USER postgres
+
+WORKDIR /tmp
+RUN git clone https://github.com/postgres/postgres
+WORKDIR postgres
+RUN git checkout REL_$(echo $VERSION | sed s/\\./_/g)_STABLE
+COPY pg_rewind.patch /tmp
+RUN git apply /tmp/pg_rewind.patch
+RUN ./configure \
+  --with-openssl \
+  --bindir=/usr/lib/postgresql/$VERSION/bin \
+  --libdir=/usr/lib/postgresql/$VERSION/lib
+RUN make
+
+USER root
+RUN make install
+
+RUN apt-get install -y postgresql-common
+RUN chown postgres:postgres /etc/postgresql
+RUN chown postgres:postgres /tmp/postgres
+USER postgres
+RUN make check
+WORKDIR /
+RUN rm -fr /tmp/postgres
+RUN pg_createcluster -p 5432 $VERSION main
+
+RUN pg_createcluster -p 5433 $VERSION pg1
+RUN pg_createcluster -p 5434 $VERSION pg2
+
+ENV PG1_ETC /etc/postgresql/$VERSION/pg1
+ENV PG2_ETC /etc/postgresql/$VERSION/pg2
+ENV PG1_PGDATA /var/lib/postgresql/$VERSION/pg1
+ENV PG2_PGDATA /var/lib/postgresql/$VERSION/pg2
+ENV PG1_CRED "-h /var/run/postgresql -p 5433"
+ENV PG2_CRED "-h /var/run/postgresql -p 5434"
+ENV PG1_CONN "host=/var/run/postgresql port=5433"
+ENV PG2_CONN "host=/var/run/postgresql port=5434"
+
+COPY --chown=postgres:postgres server.key $PG1_PGDATA
+COPY --chown=postgres:postgres server.key $PG2_PGDATA
+RUN chmod 400 $PG1_PGDATA/server.key
+RUN chmod 400 $PG2_PGDATA/server.key
+COPY --chown=postgres:postgres postgresql.conf.append /tmp/postgresql.conf
+RUN cat /tmp/postgresql.conf >> $PG1_ETC/postgresql.conf
+RUN cat /tmp/postgresql.conf >> $PG2_ETC/postgresql.conf
+COPY --chown=postgres:postgres recovery.done.pg1 $PG1_PGDATA/recovery.done
+COPY --chown=postgres:postgres recovery.conf.pg2 $PG2_PGDATA/recovery.conf
+COPY --chown=postgres:postgres start.sh /usr/local/bin/start.sh
+
+CMD ["start.sh"]

@@ -1,0 +1,62 @@
+
+PostgreSQL 10.1: pg_rewind corrupts control file global/pg_control
+
+bug
+===
+
+libpq_fetch.c loops twice over files in pgdata, a first time in 
+libpq_executeFileMap(), and then a second time (for files with action
+FILE_ACTION_COPY or FILE_ACTION_COPY_TAIL) in receiveFileChunks(). 
+For FILE_ACTION_COPY, it deletes (truncates) the file from the target directory
+already during the first loop. If pg_rewind then encounters a read-only file 
+(e.g. server.key) still during the first loop, it exits with pg_fatal
+("could not open target file"). After such truncation of global/pg_control
+pg_rewind cannot run again ("unexpected control file size 0, , expected 8192")
+and a restore from pg_basebackup is needed. 
+
+patch
+=====
+
+Truncation of the file was moved to the second loop. Truncation occurs there if
+chunks are written into files at offset 0. This is the case for 
+FILE_ACTION_COPY. An additional SQL "ORDER BY path, begin" ensures that these
+chunks are processed first.
+
+demonstrate bug and patch
+=========================
+
+$ docker build -f Dockerfile.unpatched -t unpatched .
+$ docker build -f Dockerfile.patched -t patched .
+$ docker run -d --name unpatched unpatched
+$ docker logs -f unpatched # wait for "done", then CTRL+C
+$ docker run -d --name patched patched
+$ docker logs -f patched # wait for "done", then CTRL+C
+
+log output for "unpatched"
+==========================
+
+PostgreSQL 10.1
+create pgbench on pg1
+pg_basebackup from pg1 to pg2
+start streaming replication from pg1 to pg2
+pg1 in split-brain situation
+failover from pg1 to pg2
+rewind pg1 to pg2 (1st attempt)
+could not open target file "/var/lib/postgresql/10/pg1/server.key": Permission denied
+rewind pg1 to pg2 (2nd attempt)
+unexpected control file size 0, expected 8192
+done
+
+log output for "patched"
+========================
+
+PostgreSQL 10.1
+create pgbench on pg1
+pg_basebackup from pg1 to pg2
+start streaming replication from pg1 to pg2
+pg1 in split-brain situation
+failover from pg1 to pg2
+rewind pg1 to pg2 (1st attempt)
+could not open target file "/var/lib/postgresql/10/pg1/server.key": Permission denied
+rewind pg1 to pg2 (2nd attempt)
+done
